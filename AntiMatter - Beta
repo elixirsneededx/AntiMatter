@@ -1,0 +1,540 @@
+local Bracket = loadstring(game:HttpGet("https://raw.githubusercontent.com/AlexR32/Bracket/main/BracketV32.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Blissful4992/ESPs/main/UniversalSkeleton.lua"))()
+
+-- Services
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- GlobVars
+local Skeletons = {}
+local ESPEnabled = false
+local AimbotEnabled = false
+local SilentAimEnabled = false
+local FOVEnabled = false
+local AimbotTarget = "Head"
+local FOVRadius = 200
+local FOVCircle = nil
+
+-- New Features
+local VisibleTargetOnly = false
+local RightMouseAimbot = false
+local AimLine = nil
+
+-- Local Player Features
+local MovementSpeedEnabled = false
+local MovementSpeed = 16
+local FlyEnabled = false
+local FlySpeed = 50
+local NoClipEnabled = false
+local JumpPowerEnabled = false
+local JumpPower = 50
+local InfiniteJumpEnabled = false
+local TeleportEnabled = false
+local GravityEnabled = true
+local GravityValue = 196.2
+
+-- Visibility Check Function
+local function IsVisibleToPlayer(target)
+    local character = LocalPlayer.Character
+    local targetCharacter = target.Character
+    
+    if not character or not targetCharacter then return false end
+    
+    local root = character:FindFirstChild("HumanoidRootPart")
+    local targetRoot = targetCharacter:FindFirstChild("HumanoidRootPart")
+    
+    if not root or not targetRoot then return false end
+    
+    local origin = root.Position
+    local direction = (targetRoot.Position - origin).Unit
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local raycastResult = workspace:Raycast(origin, direction * (origin - targetRoot.Position).Magnitude, raycastParams)
+    
+    return raycastResult == nil or raycastResult.Instance:IsDescendantOf(targetCharacter)
+end
+
+-- Create Aim Line
+local function CreateAimLine()
+    if AimLine then AimLine:Remove() end
+    AimLine = Drawing.new("Line")
+    AimLine.Thickness = 2
+    AimLine.Color = Color3.new(1, 0, 0)
+    AimLine.Visible = false
+end
+
+-- ESP Skeleton Creation Function
+local function CreateSkeletons()
+    for _, skeleton in pairs(Skeletons) do
+        skeleton:Remove()
+    end
+    Skeletons = {}
+
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer and ESPEnabled then
+            local skeleton = Library:NewSkeleton(Player, true)
+            table.insert(Skeletons, skeleton)
+        end
+    end
+
+    Players.PlayerAdded:Connect(function(Player)
+        if Player ~= LocalPlayer and ESPEnabled then
+            local skeleton = Library:NewSkeleton(Player, true)
+            table.insert(Skeletons, skeleton)
+        end
+    end)
+end
+
+-- Improved Fly Function
+local function ToggleFly()
+    if FlyEnabled then
+        local character = LocalPlayer.Character
+        if not character then return end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        if not humanoid or not rootPart then return end
+        
+        local bodyVelocity = Instance.new("BodyVelocity")
+        bodyVelocity.Name = "FlyVelocity"
+        bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+        bodyVelocity.Parent = rootPart
+        
+        local bodyGyro = Instance.new("BodyGyro")
+        bodyGyro.Name = "FlyGyro"
+        bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bodyGyro.CFrame = rootPart.CFrame
+        bodyGyro.Parent = rootPart
+        
+        local flyConnection
+        flyConnection = RunService.Heartbeat:Connect(function()
+            if not FlyEnabled then
+                flyConnection:Disconnect()
+                if bodyVelocity then bodyVelocity:Destroy() end
+                if bodyGyro then bodyGyro:Destroy() end
+                return
+            end
+            
+            local moveDirection = Vector3.new(
+                UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or (UserInputService:IsKeyDown(Enum.KeyCode.A) and -1 or 0),
+                0,
+                UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or (UserInputService:IsKeyDown(Enum.KeyCode.S) and -1 or 0)
+            )
+            
+            local camera = workspace.CurrentCamera
+            local lookVector = camera.CFrame.LookVector
+            local rightVector = camera.CFrame.RightVector
+            local upVector = camera.CFrame.UpVector
+            
+            -- Vertical movement based on camera look direction
+            local verticalMovement = 0
+            if moveDirection.Magnitude > 0 then
+                if UserInputService:IsKeyDown(Enum.KeyCode.E) then
+                    verticalMovement = 1
+                elseif UserInputService:IsKeyDown(Enum.KeyCode.Q) then
+                    verticalMovement = -1
+                end
+            end
+            
+            local flyVector = 
+                lookVector * moveDirection.Z + 
+                rightVector * moveDirection.X + 
+                upVector * verticalMovement
+            
+            bodyVelocity.Velocity = flyVector * FlySpeed
+            bodyGyro.CFrame = camera.CFrame
+        end)
+    end
+end
+
+-- Teleport Function
+local function TeleportToNearestPlayer()
+    if not LocalPlayer.Character then return end
+    
+    local ClosestPlayer = nil
+    local ShortestDistance = math.huge
+    
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+            local targetRoot = Player.Character.HumanoidRootPart
+            local distance = (LocalPlayer.Character.HumanoidRootPart.Position - targetRoot.Position).Magnitude
+            
+            if distance < ShortestDistance then
+                ClosestPlayer = Player
+                ShortestDistance = distance
+            end
+        end
+    end
+    
+    if ClosestPlayer and ClosestPlayer.Character then
+        local targetRoot = ClosestPlayer.Character.HumanoidRootPart
+        LocalPlayer.Character.HumanoidRootPart.CFrame = targetRoot.CFrame
+    end
+end
+
+-- Aimbot Function
+local function Aimbot()
+    if not AimbotEnabled or (RightMouseAimbot and not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)) then return end
+
+    local ClosestPlayer, ShortestDistance = nil, FOVRadius
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player ~= LocalPlayer and Player.Character and Player.Character:FindFirstChild(AimbotTarget) then
+            if (not VisibleTargetOnly or IsVisibleToPlayer(Player)) then
+                local TargetPart = Player.Character[AimbotTarget]
+                local ScreenPoint, OnScreen = Camera:WorldToViewportPoint(TargetPart.Position)
+                local MousePos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local Distance = (MousePos - Vector2.new(ScreenPoint.X, ScreenPoint.Y)).Magnitude
+
+                if OnScreen and Distance < ShortestDistance then
+                    ClosestPlayer, ShortestDistance = Player, Distance
+                end
+            end
+        end
+    end
+
+    if ClosestPlayer and ClosestPlayer.Character then
+        local TargetPart = ClosestPlayer.Character[AimbotTarget]
+        
+        if AimLine then
+            local targetScreenPos = Camera:WorldToViewportPoint(TargetPart.Position)
+            local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            
+            AimLine.From = screenCenter
+            AimLine.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
+            AimLine.Visible = true
+        end
+        
+        if not SilentAimEnabled then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, TargetPart.Position)
+        end
+
+        return ClosestPlayer
+    else
+        if AimLine then
+            AimLine.Visible = false
+        end
+        return nil
+    end
+end
+
+-- Movement Speed Function
+local function ApplyMovementSpeed()
+    if MovementSpeedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        local humanoid = LocalPlayer.Character.Humanoid
+        humanoid.WalkSpeed = MovementSpeed
+    end
+end
+
+-- Jump Power Function
+local function ApplyJumpPower()
+    if JumpPowerEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        local humanoid = LocalPlayer.Character.Humanoid
+        humanoid.JumpPower = JumpPower
+    end
+end
+
+-- NoClip Function
+local function ApplyNoClip()
+    if NoClipEnabled and LocalPlayer.Character then
+        for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end
+
+-- Gravity Function
+local function ApplyGravity()
+    workspace.Gravity = GravityEnabled and GravityValue or 0
+end
+
+-- FOV Circle
+local function UpdateFOVCircle()
+    if FOVCircle then FOVCircle:Remove() end
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Radius = FOVRadius
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Color = Color3.new(1, 0.23921568627450981, 1)
+    FOVCircle.Thickness = 2
+    FOVCircle.Filled = false
+    FOVCircle.Visible = FOVEnabled
+end
+
+-- GUI
+local Window = Bracket:Window({
+    Name = "AntiMatter - Beta 1.06",
+    Enabled = true,
+    Color = Color3.new(1, 0.250980, 0.811764),
+    Size = UDim2.new(0, 496, 0, 496),
+    Position = UDim2.new(0.5, -248, 0.5, -248)
+}) do
+    -- ESP Tab
+    local ESPTab = Window:Tab({Name = "ESP & Tracking"}) do
+        ESPTab:Toggle({
+            Name = "Enable Skeleton ESP",
+            Side = "Left",
+            Value = false,
+            Callback = function(bool)
+                ESPEnabled = bool
+                if bool then
+                    CreateSkeletons()
+                else
+                    for _, skeleton in pairs(Skeletons) do
+                        skeleton:Remove()
+                    end
+                    Skeletons = {}
+                end
+            end
+        })
+    end
+
+    -- Aimbot Tab
+    local AimbotTab = Window:Tab({Name = "Aimbot"}) do
+        AimbotTab:Toggle({
+            Name = "Enable Aimbot", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                AimbotEnabled = Bool
+            end
+        })
+
+        AimbotTab:Toggle({
+            Name = "Silent Aim", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                SilentAimEnabled = Bool
+            end
+        })
+
+        AimbotTab:Dropdown({
+            Name = "Target Body Part", 
+            Side = "Left", 
+            Default = {AimbotTarget}, 
+            List = {
+                {Name = "Head", Mode = "Button", Value = false, Callback = function() AimbotTarget = "Head" end},
+                {Name = "HumanoidRootPart", Mode = "Button", Value = false, Callback = function() AimbotTarget = "HumanoidRootPart" end}
+            }
+        })
+
+        AimbotTab:Toggle({
+            Name = "Visible Targets Only", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                VisibleTargetOnly = Bool
+            end
+        })
+
+        AimbotTab:Toggle({
+            Name = "Right Mouse Toggle", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                RightMouseAimbot = Bool
+            end
+        })
+    end
+
+    -- FOV Tab
+    local FOVTab = Window:Tab({Name = "FOV Features"}) do
+        FOVTab:Toggle({
+            Name = "Enable FOV Circle", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                FOVEnabled = Bool
+                UpdateFOVCircle()
+            end
+        })
+
+        FOVTab:Slider({
+            Name = "FOV Radius", 
+            Side = "Left", 
+            Min = 50, 
+            Max = 500, 
+            Value = FOVRadius, 
+            Callback = function(Value)
+                FOVRadius = Value
+                UpdateFOVCircle()
+            end
+        })
+    end
+
+    -- Local Tab
+    local LocalTab = Window:Tab({Name = "Local Features"}) do
+        -- Movement Speed
+        LocalTab:Toggle({
+            Name = "Movement Speed", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                MovementSpeedEnabled = Bool
+            end
+        })
+
+        LocalTab:Slider({
+            Name = "Movement Speed", 
+            Side = "Left", 
+            Min = 16, 
+            Max = 100, 
+            Value = 16, 
+            Callback = function(Value)
+                MovementSpeed = Value
+            end
+        })
+
+        -- Fly
+        LocalTab:Toggle({
+            Name = "Fly", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                FlyEnabled = Bool
+                ToggleFly()
+            end
+        })
+
+        LocalTab:Slider({
+            Name = "Flight Speed", 
+            Side = "Left", 
+            Min = 10, 
+            Max = 200, 
+            Value = 50, 
+            Callback = function(Value)
+                FlySpeed = Value
+            end
+        })
+
+        -- NoClip
+        LocalTab:Toggle({
+            Name = "NoClip", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                NoClipEnabled = Bool
+            end
+        })
+
+        -- Jump Power
+        LocalTab:Toggle({
+            Name = "Custom Jump Power", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                JumpPowerEnabled = Bool
+            end
+        })
+
+        LocalTab:LocalTab:Slider({
+            Name = "Jump Power", 
+            Side = "Left", 
+            Min = 50, 
+            Max = 250, 
+            Value = 50, 
+            Callback = function(Value)
+                JumpPower = Value
+            end
+        })
+
+        -- Infinite Jump
+        LocalTab:Toggle({
+            Name = "Infinite Jump", 
+            Side = "Left", 
+            Value = false, 
+            Callback = function(Bool)
+                InfiniteJumpEnabled = Bool
+            end
+        })
+
+        -- Gravity
+        LocalTab:Toggle({
+            Name = "Custom Gravity", 
+            Side = "Left", 
+            Value = true, 
+            Callback = function(Bool)
+                GravityEnabled = Bool
+                ApplyGravity()
+            end
+        })
+
+        LocalTab:Slider({
+            Name = "Gravity", 
+            Side = "Left", 
+            Min = 0, 
+            Max = 300, 
+            Value = 196.2, 
+            Callback = function(Value)
+                GravityValue = Value
+                ApplyGravity()
+            end
+        })
+
+        -- Teleport
+        LocalTab:Button({
+            Name = "Teleport to Nearest Player",
+            Side = "Left",
+            Callback = function()
+                TeleportToNearestPlayer()
+            end
+        })
+    end
+end
+
+-- Primary Loop
+RunService.RenderStepped:Connect(function()
+    if ESPEnabled and #Skeletons == 0 then
+        CreateSkeletons()
+    end
+    
+    if AimbotEnabled then
+        local target = Aimbot()
+        
+        -- Silent Aim Left Click Handler
+        if SilentAimEnabled and target and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local character = target.Character
+            if character and character:FindFirstChild("Humanoid") then
+                character.Humanoid:TakeDamage(10)  -- Example damage
+            end
+        end
+    end
+
+    if MovementSpeedEnabled then
+        ApplyMovementSpeed()
+    end
+
+    if JumpPowerEnabled then
+        ApplyJumpPower()
+    end
+
+    if NoClipEnabled then
+        ApplyNoClip()
+    end
+end)
+
+-- Infinite Jump Handler
+UserInputService.JumpRequest:Connect(function()
+    if InfiniteJumpEnabled then
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end)
+
+-- Initial Setup
+UpdateFOVCircle()
+CreateAimLine()
