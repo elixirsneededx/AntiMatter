@@ -436,7 +436,7 @@ local Window = Bracket:Window({
             end
         })
 
-        LocalTab:LocalTab:Slider({
+        LocalTab:Slider({
             Name = "Jump Power", 
             Side = "Left", 
             Min = 50, 
